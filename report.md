@@ -4,185 +4,240 @@
 
 
 ### 解題策略
-- 第一題:
-  - 遞迴
-    1. 把題目分解成 $m = 0$ , $n = 0$ ,m跟n都不為0的情況，並組合成遞迴函式。
-    2. 當 $m = 0$ 時，返回 $n+1$ 作為遞迴的結束條件。
-  - 非遞迴
-    1. 用陣列模擬遞迴呼叫
-    2. 不斷從堆疊中取出一個 m 來處理
-    3. 根據 m 和 n 的值決定下一步動作：
-  
-- 第二題:
-  - 用遞迴來決定第 index 個元素要不要放進子集合，直到 index == n（走到最後），就輸出目前結果。
-  - 對於每一個元素，有兩種選擇：
-    1. 不選它
-    → 子集合不包含這個元素
-    2. 選它
-    → 子集合包含這個元素
+想法（How to do?）：
+  - 用 Term{coef, exp} 的動態陣列 termArray 表示多項式，newTerm 將項 append（遇滿自動擴充）。
+  - 加法 Add：把兩個多項視合併；相同次方則係數相加。
+  - 乘法 Mult：對 A 的每項與 B 的每項相乘，將乘出項放入結果 c；若 c 已有相同次方則累加，否則新增。最後刪除係數為 0 的項並將結果排序成降冪。
+  - Eval：對每項計算 coef * x^exp（使用 powf）並累加。
+    
+簡短範例：
+  - A = $3X^4 + 2X^2 + 1$
+  - B = $1X^3 + 4X^1$
+  - A+B = $3X^4 + 1X^3 + 2X^2 + 4X^1 + 1$
+  - A*B = $3X^7 + 14X^5 + 9X^3 + 4X^1$
+  - Eval(2)：$A(2)=57, B(2)$
 
 ## 程式實作
 
 以下為主要程式碼：
-- 第一題
 ```cpp
 #include <iostream>
-#include <cstdlib> // for exit()
-
+#include <algorithm>
+#include <cmath>
 using namespace std;
 
-// 遞迴版
-int AckermannRecursive(int m, int n) {
-    if (m == 0) {
-        return n + 1;
+class Polynomial;
+
+class Term {
+    friend Polynomial;
+    friend ostream& operator<<(ostream& output, const Polynomial& Poly);
+private:
+    int exp;
+    float coef;
+};
+
+class Polynomial {
+private:
+    Term* termArray;    //陣列本體
+    int capacity;       //陣列大小
+    int terms;          //陣列內持數字
+public:
+    Polynomial() : capacity(2), terms(0) {
+        termArray = new Term[capacity];
     }
-    else if (n == 0) {
-        return AckermannRecursive(m - 1, 1);
+
+    // 最低限度的深拷貝以避免回傳時 double-delete
+    Polynomial(const Polynomial& other) : capacity(other.capacity), terms(other.terms) {
+        termArray = new Term[capacity];
+        copy(other.termArray, other.termArray + other.terms, termArray);
     }
-    else {
-        return AckermannRecursive(m - 1, AckermannRecursive(m, n - 1));
+
+    Polynomial& operator=(const Polynomial& other) {
+        if (this == &other) return *this;
+        delete[] termArray;
+        capacity = other.capacity;
+        terms = other.terms;
+        termArray = new Term[capacity];
+        copy(other.termArray, other.termArray + other.terms, termArray);
+        return *this;
     }
+
+    ~Polynomial() { delete[] termArray; }
+
+    Polynomial Add(Polynomial b);
+
+    Polynomial Mult(Polynomial b);
+
+    float Eval(float x);
+
+    void newTerm(const float newcoef, const int newexp);
+
+    friend istream& operator>>(istream& input, Polynomial& Poly);
+    friend ostream& operator<<(ostream& output, const Polynomial& Poly);
+};
+
+istream& operator>>(istream& is, Polynomial& poly) {
+    float coef;
+    int exp, n;
+    if (!(is >> n)) return is;
+    while (n--) {
+        is >> coef >> exp;
+        poly.newTerm(coef, exp);
+    }
+    return is;
 }
 
-//非遞迴版
+ostream& operator<<(ostream& os, const Polynomial& poly) {
+    if (poly.terms == 0) {
+        os << "0";
+        return os;
+    }
+    for (int i = 0; i < poly.terms; ++i) {
+        if (i > 0) os << " + ";
+        os << poly.termArray[i].coef << "X^" << poly.termArray[i].exp;
+    }
+    return os;
+}
 
-int AckermannNonRecursive(int m, int n) {
-    int stack[100000];
-    int top = 0;
-
-    stack[top++] = m;
-
-    while (top > 0) {
-        m = stack[--top]; // pop
-
-        if (m == 0) {
-            n = n + 1;
+Polynomial Polynomial::Add(Polynomial b) {
+    Polynomial c;
+    int aPos = 0, bPos = 0;
+    while ((aPos < terms) && (bPos < b.terms))
+        if (termArray[aPos].exp == b.termArray[bPos].exp) {
+            float t = termArray[aPos].coef + b.termArray[bPos].coef;
+            if (t) c.newTerm(t, termArray[aPos].exp);
+            aPos++; bPos++;
         }
-        else if (n == 0) {
-            stack[top++] = m - 1;
-            n = 1;
+        else if (termArray[aPos].exp < b.termArray[bPos].exp) {
+            c.newTerm(b.termArray[bPos].coef, b.termArray[bPos].exp);
+            bPos++;
         }
         else {
-            stack[top++] = m - 1;
-            stack[top++] = m;
-            n = n - 1;
+            c.newTerm(termArray[aPos].coef, termArray[aPos].exp);
+            aPos++;
+        }
+
+    for (;aPos < terms;aPos++)
+        c.newTerm(termArray[aPos].coef, termArray[aPos].exp);
+    for (;bPos < b.terms;bPos++)
+        c.newTerm(b.termArray[bPos].coef, b.termArray[bPos].exp);
+    return c;
+}
+
+Polynomial Polynomial::Mult(Polynomial b) {
+    // 逐項相乘，若同指數則累加係數
+    Polynomial c;
+    for (int i = 0; i < terms; ++i) {
+        for (int j = 0; j < b.terms; ++j) {
+            int newExp = termArray[i].exp + b.termArray[j].exp;
+            float newCoef = termArray[i].coef * b.termArray[j].coef;
+
+            // 如果 c 中已經有相同指數，則累加；否則新增
+            bool found = false;
+            for (int k = 0; k < c.terms; ++k) {
+                if (c.termArray[k].exp == newExp) {
+                    c.termArray[k].coef += newCoef;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                c.newTerm(newCoef, newExp);
+            }
         }
     }
 
-    return n;
+    // 移除係數為 0 的項（可能是累加後變為 0）
+    int write = 0;
+    for (int i = 0; i < c.terms; ++i) {
+        if (c.termArray[i].coef != 0.0f) {
+            if (write != i) c.termArray[write] = c.termArray[i];
+            ++write;
+        }
+    }
+    c.terms = write;
+
+    //把結果依 exp 做降冪排序
+    for (int i = 0; i < c.terms; ++i) {
+        int maxIdx = i;
+        for (int j = i + 1; j < c.terms; ++j) {
+            if (c.termArray[j].exp > c.termArray[maxIdx].exp) maxIdx = j;
+        }
+        if (maxIdx != i) swap(c.termArray[i], c.termArray[maxIdx]);
+    }
+
+    return c;
 }
 
-//主程式
+float Polynomial::Eval(float x) {
+    float result = 0.0f;
+    for (int i = 0; i < terms; ++i) {
+        result += termArray[i].coef * powf(x, termArray[i].exp);
+    }
+    return result;
+}
+
+void Polynomial::newTerm(const float theCoef, const int theExp) {
+    if (theCoef == 0) return;
+    if (terms == capacity) {
+        capacity *= 2;
+        Term* temp = new Term[capacity];
+        copy(termArray, termArray + terms, temp);
+        delete[]termArray;
+        termArray = temp;
+    }
+    termArray[terms].coef = theCoef;
+    termArray[terms++].exp = theExp;
+}
+
 int main() {
-    int m, n;
-    cout << "Enter m and n: ";
-    cin >> m >> n;
-    cout << "[遞迴] Ackermann(" << m << ", " << n << ") = " << AckermannRecursive(m, n) << endl;
-    cout << "[非遞迴] Ackermann(" << m << ", " << n << ") = " << AckermannNonRecursive(m, n) << endl;
+    // 輸入格式：
+    // n coef exp coef exp ...  (n 為項數)
+    
+    Polynomial A, B;
+    if (!(cin >> A)) return 0; // 若沒有輸入則結束
+    if (!(cin >> B)) return 0;
+
+    cout << "A = " << A << endl;
+    cout << "B = " << B << endl;
+
+    Polynomial sum = A.Add(B);
+    cout << "A + B = " << sum << endl;
+
+    Polynomial prod = A.Mult(B);
+    cout << "A * B = " << prod << endl;
+
+    // 若接著還有一個 float，則對 A 與 B 做 evaluation
+    float x;
+    if (cin >> x) {
+        cout << "A(" << x << ") = " << A.Eval(x) << endl;
+        cout << "B(" << x << ") = " << B.Eval(x) << endl;
+    }
+
     return 0;
 }
-
-```
-- 第二題
-```cpp
-#include <iostream>
-#include <string>
-using namespace std;
-
-// 遞迴列印 powerset
-void powerSet(const string S[], int n, int index, string subset) {
-    if (index == n) {
-        cout << "{ " << subset << " }";
-        return;
-    }
-
-    // 不包含目前元素
-    powerSet(S, n, index + 1, subset);
-
-    // 包含目前元素
-    string next = subset;
-    if (!next.empty()) next += " ";
-    next += S[index];
-    powerSet(S, n, index + 1, next);
-}
-
-int main() {
-    int n;
-    cout << "輸入集合的元素個數 n: ";
-    cin >> n;
-
-    if (n <= 0) {
-        cout << "集合為空。" << endl;
-        return 0;
-    }
-
-    string S[100];  // 假設最多 100 個元素
-    cout << "請輸入 " << n << " 個元素（用空白分隔）:" << endl;
-
-    for (int i = 0; i < n; i++) {
-        cin >> S[i];
-    }
-
-    cout << "\n集合的冪集 (powerset) 為：" << endl;
-    powerSet(S, n, 0, "");
-
-    return 0;
-}
-
 ```
 ## 效能分析
-- 第一題($m \leq 3$)
+假設兩多項各有 n、m 項
 
-| m 值 | 時間複雜度 | 空間複雜度 |
-| --- | ----- | ----- |
-| 0   | O(1)  | O(1)  |
-| 1   | O(n)  | O(n)  |
-| 2   | O(n)  | O(n)  |
-| 3   | O(2ⁿ) | O(n)  |
+時間複雜度：
+- Add：O(n + m)
+- Mult：兩重迴圈產生 nm 個乘項；每個乘項在結果 c 中做線性搜尋是否同次方（最壞情況 c 可接近 nm），加上結果最後用簡單選擇式排序 O(c^2)。總體最壞可達 O((n*m)^2)（或寫作 O(n^2 m^2) 的上界），實務上隨項數增大會非常慢。
+- Eval：O(k)（k 為該多項的項數），每項呼叫 powf。
 
-- 第二題
-1. 時間複雜度：程式的時間複雜度為 $O(2^n)$。
-2. 空間複雜度：空間複雜度為 $O(n)$。
+空間複雜度：
+- 結果多項 c 最多可能有 O(nm) 項（每對項次方不同），因此額外空間為 O(nm)。整體記憶體由 termArray 與結果佔用，且使用原生 new[]/delete[] 管理。
 
 ## 測試與驗證
 
 ### 測試案例
-- 第一題
-
-| 測試案例 | 輸入參數 $m$ | 輸入參數 $n$ | 預期輸出 | 實際輸出 |
-|----------|--------------|--------------|----------|-----------|
-| 測試一   | $m = 1$      | $n = 10$     | 12        | 遞迴:12   非遞迴:12      |
-| 測試二   | $m = 2$      | $n = 5$      | 13        | 遞迴:13   非遞迴:13      |
-| 測試三   | $m = 3$      | $n = 2$      | 29        | 遞迴:29   非遞迴:29      |
-| 測試四   | $m = 4$      | $n = 1$      | 65533     | 無法計算   |
-
-- 第二題
-
-| 測試案例 | 輸入參數 $n$ | 輸入集合 $S$ | 預期輸出 | 實際輸出 |
-|----------|--------------|--------------|----------|-----------|
-| 測試一   | $n = 3$      | $S = {1,2,3}$     | {  }{ 3 }{ 2 }{ 2 3 }{ 1 }{ 1 3 }{ 1 2 }{ 1 2 3 }|{  }{ 3 }{ 2 }{ 2 3 }{ 1 }{ 1 3 }{ 1 2 }{ 1 2 3 }|
-| 測試二   | $n = 4$      | $S = {t,e,s,t}$      |{  }{ t }{ s }{ s t }{ e }{ e t }{ e s }{ e s t }{ t }{ t t }{ t s }{ t s t }{ t e }{ t e t }{ t e s }{ t e s t }|{  }{ t }{ s }{ s t }{ e }{ e t }{ e s }{ e s t }{ t }{ t t }{ t s }{ t s t }{ t e }{ t e t }{ t e s }{ t e s t }|
-| 測試三   | $n = -1$      |      | 集合為空        | 集合為空        |
-### 結論
-第一題
-1. 程式能正確計算 ($m$ , $n$) 的Ackermann's function。  
-2. 在 $m \gt 3$ 的情況下，程式會Stack Overflow 
-3. 在 $m \leq 3$ 的情況下，程式會正確顯示結果
-
-第二題
-1. 能夠正確計算冪集
-2. 在 $n\leq 0$的情況下，程式會輸出集合為空
+<img width="561" height="217" alt="image" src="https://github.com/user-attachments/assets/dcf2f100-6597-43da-be75-630af740d650" />
+<img width="776" height="226" alt="image" src="https://github.com/user-attachments/assets/d9a2e343-cccc-4be5-b81d-fc50b7e47fcd" />
 
 
-## 申論及開發報告
+## 效能測量
+預期Add 應呈線性增長，Mult 隨 n,m 增大會呈現快速上升。
 
-### 第一題非遞迴選擇陣列的原因
-- 用能夠用堆疊模仿遞迴
-### 第二題選擇遞迴的原因
-1. 對於每個元素，有兩個選擇：
-  -  不包含這個元素
-  -  包含這個元素
+## 心得
+這次在寫程式時第一次碰到double-delete的問題，後來學習到能透過深複製來解決，也加強了我對於類別的熟悉度，以及練習了多載，不得不說這次的做起來難度比上次高了不少。
 
-「對每個元素有兩個選擇」的結構，天然形成了一個二叉樹，遞迴正好可以用程式自然地表現這種分支結構
-  
-2. 代碼簡潔、清楚，不需要寫一堆迴圈
